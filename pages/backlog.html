@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Backlog — LightSprint</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 min-h-screen">
+  <div id="navbar"></div>
+
+  <main class="max-w-4xl mx-auto px-6 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <div class="text-sm text-slate-500 mb-1">
+          <a href="dashboard.html" class="hover:text-indigo-600">Projects</a>
+          <span class="mx-1">›</span>
+          <span id="project-name" class="text-slate-700 font-medium">Loading...</span>
+        </div>
+        <h1 class="text-xl font-bold text-slate-800">Backlog</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Tasks not yet assigned to a sprint</p>
+      </div>
+      <div class="flex gap-2">
+        <a id="board-link" href="#" class="text-sm px-3 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-100">Board</a>
+        <button id="add-task-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">+ Add Task</button>
+      </div>
+    </div>
+
+    <!-- Sprint assignment bar -->
+    <div class="bg-white border border-slate-200 rounded-xl p-4 mb-5 flex items-center gap-3">
+      <span class="text-sm text-slate-600 font-medium">Move selected to:</span>
+      <select id="sprint-select" class="text-sm border border-slate-300 rounded-lg px-3 py-1.5 outline-none flex-1 max-w-xs">
+        <option value="">Choose a sprint...</option>
+      </select>
+      <button id="assign-btn" class="text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">Assign to Sprint</button>
+    </div>
+
+    <div id="backlog-list" class="space-y-2">
+      <div class="text-center text-slate-400 py-10">Loading backlog...</div>
+    </div>
+  </main>
+
+  <!-- Add Task Modal -->
+  <div id="task-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+      <h2 class="text-lg font-semibold text-slate-800 mb-4">Add to Backlog</h2>
+      <div id="task-error" class="hidden mb-3 px-3 py-2 bg-red-50 text-red-600 text-sm rounded-lg border border-red-200"></div>
+      <form id="task-form" class="space-y-3">
+        <input type="text" id="task-title" required placeholder="Task title *"
+          class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
+        <textarea id="task-desc" rows="2" placeholder="Description (optional)"
+          class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm resize-none"></textarea>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Priority</label>
+            <select id="task-priority" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none">
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="high">High</option>
+              <option value="critical">Critical</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Story Points</label>
+            <input type="number" id="task-points" min="1" max="100"
+              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+          </div>
+        </div>
+        <div class="flex gap-3 justify-end pt-2">
+          <button type="button" id="task-cancel" class="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
+          <button type="submit" class="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold">Add</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module">
+    import { requireAuth } from "../assets/js/auth.js";
+    import { renderNavbar } from "../components/navbar.js";
+    import { api } from "../assets/js/api.js";
+
+    requireAuth();
+    renderNavbar();
+
+    const params = new URLSearchParams(location.search);
+    const projectId = params.get("project");
+    if (!projectId) location.href = "dashboard.html";
+
+    document.getElementById("board-link").href = `board.html?project=${projectId}`;
+
+    const PRIORITY_COLORS = { critical: "text-red-600 bg-red-50", high: "text-orange-600 bg-orange-50", medium: "text-indigo-600 bg-indigo-50", low: "text-green-600 bg-green-50" };
+    let selectedTasks = new Set();
+
+    function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+    async function loadProject() {
+      const data = await api.get(`/projects/${projectId}`);
+      if (data.project) document.getElementById("project-name").textContent = data.project.name;
+    }
+
+    async function loadSprints() {
+      const data = await api.get(`/projects/${projectId}/sprints`);
+      const sel = document.getElementById("sprint-select");
+      (data.sprints || []).filter(s => s.status !== "completed").forEach(s => {
+        const opt = document.createElement("option");
+        opt.value = s.id;
+        opt.textContent = `${s.name} (${s.status})`;
+        sel.appendChild(opt);
+      });
+    }
+
+    async function loadBacklog() {
+      const data = await api.get(`/projects/${projectId}/tasks?sprint_id=backlog`);
+      const list = document.getElementById("backlog-list");
+      list.innerHTML = "";
+      const tasks = data.tasks || [];
+
+      if (tasks.length === 0) {
+        list.innerHTML = `<div class="text-center text-slate-400 py-10">
+          <p class="text-3xl mb-2">✅</p><p>Backlog is empty</p>
+        </div>`;
+        return;
+      }
+
+      tasks.forEach(t => {
+        const row = document.createElement("div");
+        row.className = "bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center gap-3 hover:border-indigo-300 transition-colors";
+        row.innerHTML = `
+          <input type="checkbox" class="task-checkbox w-4 h-4 accent-indigo-600 cursor-pointer" data-id="${t.id}" />
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-slate-800 truncate">${esc(t.title)}</p>
+            ${t.description ? `<p class="text-xs text-slate-400 truncate mt-0.5">${esc(t.description)}</p>` : ""}
+          </div>
+          <span class="text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[t.priority] || ""}">${t.priority}</span>
+          ${t.story_points ? `<span class="text-xs text-slate-400">${t.story_points}pts</span>` : ""}
+          ${t.due_date ? `<span class="text-xs text-slate-400">${t.due_date}</span>` : ""}`;
+        list.appendChild(row);
+      });
+
+      document.querySelectorAll(".task-checkbox").forEach(cb => {
+        cb.addEventListener("change", () => {
+          if (cb.checked) selectedTasks.add(cb.dataset.id);
+          else selectedTasks.delete(cb.dataset.id);
+        });
+      });
+    }
+
+    document.getElementById("assign-btn").onclick = async () => {
+      const sprintId = document.getElementById("sprint-select").value;
+      if (!sprintId) return alert("Please select a sprint first");
+      if (selectedTasks.size === 0) return alert("Select at least one task");
+      for (const taskId of selectedTasks) {
+        await api.patch(`/tasks/${taskId}/sprint`, { sprint_id: sprintId });
+      }
+      selectedTasks.clear();
+      loadBacklog();
+    };
+
+    document.getElementById("add-task-btn").onclick = () => document.getElementById("task-modal").classList.remove("hidden");
+    document.getElementById("task-cancel").onclick = () => document.getElementById("task-modal").classList.add("hidden");
+
+    document.getElementById("task-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById("task-error");
+      errEl.classList.add("hidden");
+      const data = await api.post(`/projects/${projectId}/tasks`, {
+        title: document.getElementById("task-title").value.trim(),
+        description: document.getElementById("task-desc").value.trim(),
+        priority: document.getElementById("task-priority").value,
+        story_points: document.getElementById("task-points").value ? parseInt(document.getElementById("task-points").value) : null,
+      });
+      if (data.error) { errEl.textContent = data.error; errEl.classList.remove("hidden"); return; }
+      document.getElementById("task-modal").classList.add("hidden");
+      document.getElementById("task-form").reset();
+      loadBacklog();
+    });
+
+    await loadProject();
+    await loadSprints();
+    await loadBacklog();
+  </script>
+</body>
+</html>

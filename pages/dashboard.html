@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — LightSprint</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 min-h-screen">
+  <div id="navbar"></div>
+
+  <main class="max-w-6xl mx-auto px-6 py-8">
+    <div class="flex items-center justify-between mb-8">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-800">My Projects</h1>
+        <p class="text-slate-500 text-sm mt-1">Manage your sprint projects</p>
+      </div>
+      <button id="new-project-btn"
+        class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2">
+        + New Project
+      </button>
+    </div>
+
+    <div id="projects-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+      <div class="col-span-full text-center text-slate-400 py-12">Loading projects...</div>
+    </div>
+  </main>
+
+  <!-- New Project Modal -->
+  <div id="modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+      <h2 class="text-lg font-semibold text-slate-800 mb-4">Create New Project</h2>
+      <div id="modal-error" class="hidden mb-3 px-3 py-2 bg-red-50 text-red-600 text-sm rounded-lg border border-red-200"></div>
+      <form id="project-form" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Project Name *</label>
+          <input type="text" id="proj-name" required placeholder="My Sprint Project"
+            class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Description</label>
+          <textarea id="proj-desc" rows="3" placeholder="What is this project about?"
+            class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm resize-none"></textarea>
+        </div>
+        <div class="flex gap-3 justify-end">
+          <button type="button" id="cancel-btn" class="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
+          <button type="submit" class="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module">
+    import { requireAuth, getCurrentUser } from "../assets/js/auth.js";
+    import { renderNavbar } from "../components/navbar.js";
+    import { api } from "../assets/js/api.js";
+
+    requireAuth();
+    renderNavbar();
+
+    const grid = document.getElementById("projects-grid");
+    const modal = document.getElementById("modal");
+    const modalError = document.getElementById("modal-error");
+
+    const PRIORITY_COLORS = { critical: "#ef4444", high: "#f97316", medium: "#6366f1", low: "#22c55e" };
+
+    async function loadProjects() {
+      const data = await api.get("/projects/");
+      grid.innerHTML = "";
+
+      if (!data.projects || data.projects.length === 0) {
+        grid.innerHTML = `<div class="col-span-full text-center text-slate-400 py-12">
+          <p class="text-4xl mb-3">📋</p>
+          <p class="font-medium">No projects yet</p>
+          <p class="text-sm mt-1">Click "New Project" to get started</p>
+        </div>`;
+        return;
+      }
+
+      data.projects.forEach(p => {
+        const card = document.createElement("div");
+        card.className = "bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md transition-shadow cursor-pointer";
+        card.innerHTML = `
+          <div class="flex items-start justify-between mb-3">
+            <h3 class="font-semibold text-slate-800 text-base">${escHtml(p.name)}</h3>
+            <span class="text-xs text-slate-400">${new Date(p.created_at).toLocaleDateString()}</span>
+          </div>
+          <p class="text-sm text-slate-500 mb-4 line-clamp-2">${escHtml(p.description || "No description")}</p>
+          <div class="flex gap-2">
+            <a href="board.html?project=${p.id}" class="text-xs bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full hover:bg-indigo-100 transition-colors font-medium">Board</a>
+            <a href="backlog.html?project=${p.id}" class="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded-full hover:bg-slate-200 transition-colors font-medium">Backlog</a>
+            <a href="sprints.html?project=${p.id}" class="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded-full hover:bg-slate-200 transition-colors font-medium">Sprints</a>
+          </div>`;
+        grid.appendChild(card);
+      });
+    }
+
+    function escHtml(str) {
+      return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    document.getElementById("new-project-btn").onclick = () => {
+      modal.classList.remove("hidden");
+      modalError.classList.add("hidden");
+    };
+    document.getElementById("cancel-btn").onclick = () => modal.classList.add("hidden");
+    modal.addEventListener("click", (e) => { if (e.target === modal) modal.classList.add("hidden"); });
+
+    document.getElementById("project-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = document.getElementById("proj-name").value.trim();
+      const description = document.getElementById("proj-desc").value.trim();
+      modalError.classList.add("hidden");
+      const data = await api.post("/projects/", { name, description });
+      if (data.error) {
+        modalError.textContent = data.error;
+        modalError.classList.remove("hidden");
+        return;
+      }
+      modal.classList.add("hidden");
+      document.getElementById("project-form").reset();
+      loadProjects();
+    });
+
+    loadProjects();
+  </script>
+</body>
+</html>

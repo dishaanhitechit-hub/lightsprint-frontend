@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sprints — LightSprint</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 min-h-screen">
+  <div id="navbar"></div>
+
+  <main class="max-w-4xl mx-auto px-6 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <div class="text-sm text-slate-500 mb-1">
+          <a href="dashboard.html" class="hover:text-indigo-600">Projects</a>
+          <span class="mx-1">›</span>
+          <span id="project-name" class="text-slate-700 font-medium">Loading...</span>
+        </div>
+        <h1 class="text-xl font-bold text-slate-800">Sprints</h1>
+      </div>
+      <button id="new-sprint-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">+ New Sprint</button>
+    </div>
+
+    <div id="sprints-list" class="space-y-4">
+      <div class="text-center text-slate-400 py-10">Loading sprints...</div>
+    </div>
+  </main>
+
+  <!-- New Sprint Modal -->
+  <div id="sprint-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+      <h2 class="text-lg font-semibold text-slate-800 mb-4">Create Sprint</h2>
+      <div id="sprint-error" class="hidden mb-3 px-3 py-2 bg-red-50 text-red-600 text-sm rounded-lg border border-red-200"></div>
+      <form id="sprint-form" class="space-y-3">
+        <input type="text" id="sprint-name" required placeholder="Sprint name e.g. Sprint 1"
+          class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
+        <textarea id="sprint-goal" rows="2" placeholder="Sprint goal (optional)"
+          class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm resize-none"></textarea>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Start Date</label>
+            <input type="date" id="sprint-start" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">End Date</label>
+            <input type="date" id="sprint-end" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
+          </div>
+        </div>
+        <div class="flex gap-3 justify-end pt-2">
+          <button type="button" id="sprint-cancel" class="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
+          <button type="submit" class="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module">
+    import { requireAuth } from "../assets/js/auth.js";
+    import { renderNavbar } from "../components/navbar.js";
+    import { api } from "../assets/js/api.js";
+
+    requireAuth();
+    renderNavbar();
+
+    const params = new URLSearchParams(location.search);
+    const projectId = params.get("project");
+    if (!projectId) location.href = "dashboard.html";
+
+    const STATUS_STYLE = {
+      planning: "bg-slate-100 text-slate-600",
+      active: "bg-green-100 text-green-700",
+      completed: "bg-blue-100 text-blue-700",
+    };
+
+    function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+    async function loadProject() {
+      const data = await api.get(`/projects/${projectId}`);
+      if (data.project) document.getElementById("project-name").textContent = data.project.name;
+    }
+
+    async function loadSprints() {
+      const data = await api.get(`/projects/${projectId}/sprints`);
+      const list = document.getElementById("sprints-list");
+      list.innerHTML = "";
+      const sprints = data.sprints || [];
+
+      if (sprints.length === 0) {
+        list.innerHTML = `<div class="text-center text-slate-400 py-10">
+          <p class="text-3xl mb-2">🏃</p><p>No sprints yet. Create your first sprint!</p>
+        </div>`;
+        return;
+      }
+
+      for (const s of sprints) {
+        const statsData = await api.get(`/sprints/${s.id}/stats`);
+        const stats = statsData.total !== undefined ? statsData : { total: 0, done: 0 };
+        const pct = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
+
+        const card = document.createElement("div");
+        card.className = "bg-white border border-slate-200 rounded-xl p-5";
+        card.innerHTML = `
+          <div class="flex items-start justify-between mb-3">
+            <div>
+              <h3 class="font-semibold text-slate-800">${esc(s.name)}</h3>
+              ${s.goal ? `<p class="text-sm text-slate-500 mt-0.5">${esc(s.goal)}</p>` : ""}
+            </div>
+            <span class="text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_STYLE[s.status] || "bg-slate-100 text-slate-600"}">${s.status}</span>
+          </div>
+          <div class="flex gap-4 text-xs text-slate-500 mb-4">
+            ${s.start_date ? `<span>Start: ${s.start_date}</span>` : ""}
+            ${s.end_date ? `<span>End: ${s.end_date}</span>` : ""}
+            <span>${stats.done}/${stats.total} tasks done</span>
+          </div>
+          <div class="w-full bg-slate-100 rounded-full h-2 mb-4">
+            <div class="bg-indigo-500 h-2 rounded-full transition-all" style="width:${pct}%"></div>
+          </div>
+          <div class="flex gap-2">
+            <a href="board.html?project=${projectId}&sprint=${s.id}" class="text-xs px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 font-medium">View Board</a>
+            ${s.status === "planning" ? `<button class="action-btn text-xs px-3 py-1.5 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 font-medium" data-id="${s.id}" data-action="start">Start Sprint</button>` : ""}
+            ${s.status === "active" ? `<button class="action-btn text-xs px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-medium" data-id="${s.id}" data-action="complete">Complete Sprint</button>` : ""}
+            <button class="action-btn text-xs px-3 py-1.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 font-medium ml-auto" data-id="${s.id}" data-action="delete">Delete</button>
+          </div>`;
+        list.appendChild(card);
+      }
+
+      document.querySelectorAll(".action-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const { id, action } = btn.dataset;
+          if (action === "start") await api.post(`/sprints/${id}/start`);
+          else if (action === "complete") await api.post(`/sprints/${id}/complete`);
+          else if (action === "delete" && confirm("Delete this sprint? Tasks will stay in the project.")) await api.delete(`/sprints/${id}`);
+          loadSprints();
+        });
+      });
+    }
+
+    document.getElementById("new-sprint-btn").onclick = () => document.getElementById("sprint-modal").classList.remove("hidden");
+    document.getElementById("sprint-cancel").onclick = () => document.getElementById("sprint-modal").classList.add("hidden");
+
+    document.getElementById("sprint-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById("sprint-error");
+      errEl.classList.add("hidden");
+      const data = await api.post(`/projects/${projectId}/sprints`, {
+        name: document.getElementById("sprint-name").value.trim(),
+        goal: document.getElementById("sprint-goal").value.trim(),
+        start_date: document.getElementById("sprint-start").value || null,
+        end_date: document.getElementById("sprint-end").value || null,
+      });
+      if (data.error) { errEl.textContent = data.error; errEl.classList.remove("hidden"); return; }
+      document.getElementById("sprint-modal").classList.add("hidden");
+      document.getElementById("sprint-form").reset();
+      loadSprints();
+    });
+
+    await loadProject();
+    await loadSprints();
+  </script>
+</body>
+</html>
