@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:5000/api";
+const BASE_URL = "http://132.154.156.82:5998/api";
 
 function getToken() {
   return localStorage.getItem("access_token");
