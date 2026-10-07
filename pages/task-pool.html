@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Task Pool — LightSprint</title>
+  <link rel="stylesheet" href="../assets/css/main.css" />
+</head>
+<body>
+<script type="module">
+import { requireAuth, getCurrentUser } from "../assets/js/auth.js";
+import { renderLayout, setContent } from "../assets/js/layout.js";
+import { api } from "../assets/js/api.js";
+
+requireAuth();
+renderLayout("pool");
+
+const params = new URLSearchParams(location.search);
+const projectId = params.get("project");
+if (!projectId) location.href = "dashboard.html";
+
+function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function pBadge(p) { return `<span class="badge badge-${p}">${p}</span>`; }
+
+setContent(`
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb"><a href="dashboard.html">Projects</a> › <span id="proj-name">…</span></div>
+      <div class="page-title">🗂️ Task Pool</div>
+      <div class="page-subtitle">All new tasks land here. Review, assign, then move to backlog or sprint.</div>
+    </div>
+    <button class="btn btn-primary" id="add-task-btn">+ New Task</button>
+  </div>
+  <div class="page-body">
+    <div class="stats-row" id="stats-row"></div>
+    <div class="card" style="overflow:hidden">
+      <table class="ls-table" id="pool-table">
+        <thead>
+          <tr>
+            <th>Task</th><th>Priority</th><th>Assignee</th>
+            <th>Est. Hours</th><th>Due Date</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="pool-body"><tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Add Task Modal -->
+  <div class="modal-overlay" id="task-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="modal-title">New Task</span>
+        <button class="modal-close" id="modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="error-box" id="task-error" style="display:none"></div>
+        <form id="task-form">
+          <input type="hidden" id="edit-task-id" />
+          <div class="form-group"><label class="form-label">Title *</label>
+            <input class="form-input" id="task-title" required placeholder="Task title" /></div>
+          <div class="form-group"><label class="form-label">Description</label>
+            <textarea class="form-textarea" id="task-desc" placeholder="Describe the task..."></textarea></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Priority</label>
+              <select class="form-select" id="task-priority">
+                <option value="medium">Medium</option><option value="low">Low</option>
+                <option value="high">High</option><option value="critical">Critical</option>
+              </select></div>
+            <div class="form-group"><label class="form-label">Story Points</label>
+              <input class="form-input" type="number" id="task-points" min="1" max="100" placeholder="e.g. 3" /></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Est. Hours</label>
+              <input class="form-input" type="number" id="task-hours" min="0.5" step="0.5" placeholder="e.g. 4" /></div>
+            <div class="form-group"><label class="form-label">Due Date</label>
+              <input class="form-input" type="date" id="task-due" /></div>
+          </div>
+          <div class="form-group"><label class="form-label">Assign To</label>
+            <select class="form-select" id="task-assignee"><option value="">Unassigned</option></select></div>
+          <div class="form-group"><label class="form-label">User Story (optional)</label>
+            <select class="form-select" id="task-story"><option value="">None</option></select></div>
+          <div class="modal-footer" style="padding:0">
+            <button type="button" class="btn btn-secondary" id="task-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save Task</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Assign Sprint Modal -->
+  <div class="modal-overlay" id="sprint-modal">
+    <div class="modal" style="max-width:400px">
+      <div class="modal-header">
+        <span class="modal-title">Assign to Sprint</span>
+        <button class="modal-close" id="sprint-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group"><label class="form-label">Sprint</label>
+          <select class="form-select" id="sprint-select"><option value="">Choose sprint...</option></select></div>
+        <input type="hidden" id="sprint-task-id" />
+        <div class="modal-footer" style="padding:0">
+          <button type="button" class="btn btn-secondary" id="sprint-cancel">Cancel</button>
+          <button class="btn btn-primary" id="sprint-confirm">Assign</button>
+        </div>
+      </div>
+    </div>
+  </div>
+`);
+
+let members = [], sprints = [], stories = [], currentEditId = null;
+
+async function init() {
+  const [projData, membersData, sprintsData, storiesData] = await Promise.all([
+    api.get(`/projects/${projectId}`),
+    api.get(`/projects/${projectId}/members`),
+    api.get(`/projects/${projectId}/sprints`),
+    api.get(`/projects/${projectId}/stories`),
+  ]);
+  document.getElementById("proj-name").textContent = projData.project?.name || "";
+  members = membersData.members || [];
+  sprints = (sprintsData.sprints || []).filter(s => s.status !== "completed");
+  stories = storiesData.stories || [];
+
+  const assignSel = document.getElementById("task-assignee");
+  members.forEach(m => { const o = document.createElement("option"); o.value = m.user_id; o.textContent = m.user.name; assignSel.appendChild(o); });
+
+  const storySel = document.getElementById("task-story");
+  stories.forEach(s => { const o = document.createElement("option"); o.value = s.id; o.textContent = s.title; storySel.appendChild(o); });
+
+  const sprintSel = document.getElementById("sprint-select");
+  sprints.forEach(s => { const o = document.createElement("option"); o.value = s.id; o.textContent = `${s.name} (${s.status})`; sprintSel.appendChild(o); });
+
+  await loadPool();
+}
+
+async function loadPool() {
+  await api.post(`/projects/${projectId}/tasks/sync-overdue`);
+  const data = await api.get(`/projects/${projectId}/tasks?sprint_id=pool`);
+  const tasks = data.tasks || [];
+  const tbody = document.getElementById("pool-body");
+
+  document.getElementById("stats-row").innerHTML = `
+    <div class="stat-card accent-indigo"><div class="stat-value">${tasks.length}</div><div class="stat-label">In Pool</div></div>
+    <div class="stat-card accent-orange"><div class="stat-value">${tasks.filter(t=>t.priority==="critical"||t.priority==="high").length}</div><div class="stat-label">High Priority</div></div>
+    <div class="stat-card accent-green"><div class="stat-value">${tasks.filter(t=>t.assignee_id).length}</div><div class="stat-label">Assigned</div></div>
+    <div class="stat-card accent-red"><div class="stat-value">${tasks.filter(t=>!t.assignee_id).length}</div><div class="stat-label">Unassigned</div></div>`;
+
+  if (!tasks.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8">✅ Task pool is empty</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = tasks.map(t => `
+    <tr>
+      <td>
+        <div style="font-weight:600;color:#0f172a">${esc(t.title)}</div>
+        ${t.description ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px">${esc(t.description.slice(0,60))}${t.description.length>60?"…":""}</div>` : ""}
+      </td>
+      <td>${pBadge(t.priority)}</td>
+      <td>
+        ${t.assignee_name
+          ? `<div style="display:flex;align-items:center;gap:6px"><div class="task-card-avatar">${t.assignee_name[0]}</div><span>${esc(t.assignee_name)}</span></div>`
+          : `<span style="color:#94a3b8;font-size:12px">Unassigned</span>`}
+      </td>
+      <td>${t.estimated_hours ? `<span style="color:#4f46e5;font-weight:600">${t.estimated_hours}h</span>` : "—"}</td>
+      <td>${t.due_date ? `<span style="color:${new Date(t.due_date)<new Date()?"#dc2626":"#334155"}">${t.due_date}</span>` : "—"}</td>
+      <td>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm btn-secondary" onclick="editTask('${t.id}')">Edit</button>
+          <button class="btn btn-sm btn-ghost" onclick="moveToBacklog('${t.id}')">→ Backlog</button>
+          <button class="btn btn-sm btn-primary" onclick="openSprintModal('${t.id}')">→ Sprint</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteTask('${t.id}')">Del</button>
+        </div>
+      </td>
+    </tr>`).join("");
+}
+
+window.editTask = async (id) => {
+  const data = await api.get(`/tasks/${id}`);
+  const t = data.task;
+  currentEditId = id;
+  document.getElementById("modal-title").textContent = "Edit Task";
+  document.getElementById("edit-task-id").value = id;
+  document.getElementById("task-title").value = t.title;
+  document.getElementById("task-desc").value = t.description || "";
+  document.getElementById("task-priority").value = t.priority;
+  document.getElementById("task-points").value = t.story_points || "";
+  document.getElementById("task-hours").value = t.estimated_hours || "";
+  document.getElementById("task-due").value = t.due_date || "";
+  document.getElementById("task-assignee").value = t.assignee_id || "";
+  document.getElementById("task-story").value = t.user_story_id || "";
+  document.getElementById("task-modal").classList.add("open");
+};
+
+window.moveToBacklog = async (id) => {
+  await api.patch(`/tasks/${id}/to-backlog`, {});
+  loadPool();
+};
+
+window.deleteTask = async (id) => {
+  if (!confirm("Delete this task?")) return;
+  await api.delete(`/tasks/${id}`);
+  loadPool();
+};
+
+window.openSprintModal = (id) => {
+  document.getElementById("sprint-task-id").value = id;
+  document.getElementById("sprint-modal").classList.add("open");
+};
+
+document.getElementById("add-task-btn").onclick = () => {
+  currentEditId = null;
+  document.getElementById("modal-title").textContent = "New Task";
+  document.getElementById("task-form").reset();
+  document.getElementById("task-modal").classList.add("open");
+};
+document.getElementById("modal-close").onclick = () => document.getElementById("task-modal").classList.remove("open");
+document.getElementById("task-cancel").onclick = () => document.getElementById("task-modal").classList.remove("open");
+document.getElementById("sprint-modal-close").onclick = () => document.getElementById("sprint-modal").classList.remove("open");
+document.getElementById("sprint-cancel").onclick = () => document.getElementById("sprint-modal").classList.remove("open");
+
+document.getElementById("task-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const errEl = document.getElementById("task-error");
+  errEl.style.display = "none";
+  const payload = {
+    title: document.getElementById("task-title").value.trim(),
+    description: document.getElementById("task-desc").value.trim(),
+    priority: document.getElementById("task-priority").value,
+    story_points: document.getElementById("task-points").value ? +document.getElementById("task-points").value : null,
+    estimated_hours: document.getElementById("task-hours").value ? +document.getElementById("task-hours").value : null,
+    due_date: document.getElementById("task-due").value || null,
+    assignee_id: document.getElementById("task-assignee").value || null,
+    user_story_id: document.getElementById("task-story").value || null,
+  };
+  const id = document.getElementById("edit-task-id").value;
+  const data = id ? await api.put(`/tasks/${id}`, payload) : await api.post(`/projects/${projectId}/tasks`, payload);
+  if (data.error) { errEl.textContent = data.error; errEl.style.display = "block"; return; }
+  document.getElementById("task-modal").classList.remove("open");
+  loadPool();
+});
+
+document.getElementById("sprint-confirm").onclick = async () => {
+  const taskId = document.getElementById("sprint-task-id").value;
+  const sprintId = document.getElementById("sprint-select").value;
+  if (!sprintId) return alert("Select a sprint");
+  await api.patch(`/tasks/${taskId}/sprint`, { sprint_id: sprintId });
+  document.getElementById("sprint-modal").classList.remove("open");
+  loadPool();
+};
+
+init();
+</script>
+</body>
+</html>

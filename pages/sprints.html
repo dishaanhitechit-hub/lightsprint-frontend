@@ -1,162 +1,180 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sprints — LightSprint</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="../assets/css/main.css" />
 </head>
-<body class="bg-slate-50 min-h-screen">
-  <div id="navbar"></div>
+<body>
+<script type="module">
+import { requireAuth } from "../assets/js/auth.js";
+import { renderLayout, setContent } from "../assets/js/layout.js";
+import { api } from "../assets/js/api.js";
 
-  <main class="max-w-4xl mx-auto px-6 py-8">
-    <div class="flex items-center justify-between mb-6">
-      <div>
-        <div class="text-sm text-slate-500 mb-1">
-          <a href="dashboard.html" class="hover:text-indigo-600">Projects</a>
-          <span class="mx-1">›</span>
-          <span id="project-name" class="text-slate-700 font-medium">Loading...</span>
-        </div>
-        <h1 class="text-xl font-bold text-slate-800">Sprints</h1>
-      </div>
-      <button id="new-sprint-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">+ New Sprint</button>
+requireAuth();
+renderLayout("sprints");
+
+const params = new URLSearchParams(location.search);
+const projectId = params.get("project");
+if (!projectId) location.href = "dashboard.html";
+
+function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+setContent(`
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb"><a href="dashboard.html">Projects</a> › <span id="proj-name">…</span></div>
+      <div class="page-title">🏃 Sprints</div>
+      <div class="page-subtitle">Plan and track your sprint cycles</div>
     </div>
-
-    <div id="sprints-list" class="space-y-4">
-      <div class="text-center text-slate-400 py-10">Loading sprints...</div>
-    </div>
-  </main>
-
-  <!-- New Sprint Modal -->
-  <div id="sprint-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-      <h2 class="text-lg font-semibold text-slate-800 mb-4">Create Sprint</h2>
-      <div id="sprint-error" class="hidden mb-3 px-3 py-2 bg-red-50 text-red-600 text-sm rounded-lg border border-red-200"></div>
-      <form id="sprint-form" class="space-y-3">
-        <input type="text" id="sprint-name" required placeholder="Sprint name e.g. Sprint 1"
-          class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
-        <textarea id="sprint-goal" rows="2" placeholder="Sprint goal (optional)"
-          class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm resize-none"></textarea>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-medium text-slate-500 mb-1">Start Date</label>
-            <input type="date" id="sprint-start" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-slate-500 mb-1">End Date</label>
-            <input type="date" id="sprint-end" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
-          </div>
-        </div>
-        <div class="flex gap-3 justify-end pt-2">
-          <button type="button" id="sprint-cancel" class="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
-          <button type="submit" class="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold">Create</button>
-        </div>
-      </form>
+    <button class="btn btn-primary" id="new-sprint-btn">+ New Sprint</button>
+  </div>
+  <div class="page-body">
+    <div id="sprints-list" style="display:flex;flex-direction:column;gap:16px">
+      <p style="color:#94a3b8;text-align:center;padding:40px 0">Loading...</p>
     </div>
   </div>
 
-  <script type="module">
-    import { requireAuth } from "../assets/js/auth.js";
-    import { renderNavbar } from "../components/navbar.js";
-    import { api } from "../assets/js/api.js";
+  <div class="modal-overlay" id="sprint-modal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-header">
+        <span class="modal-title">Create Sprint</span>
+        <button class="modal-close" id="sprint-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="error-box" id="sprint-error" style="display:none"></div>
+        <form id="sprint-form">
+          <div class="form-group"><label class="form-label">Sprint Name *</label>
+            <input class="form-input" id="sprint-name" required placeholder="Sprint 1" /></div>
+          <div class="form-group"><label class="form-label">Goal</label>
+            <textarea class="form-textarea" id="sprint-goal" placeholder="What does this sprint aim to achieve?" style="min-height:60px"></textarea></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Start Date</label>
+              <input class="form-input" type="date" id="sprint-start" /></div>
+            <div class="form-group"><label class="form-label">End Date</label>
+              <input class="form-input" type="date" id="sprint-end" /></div>
+          </div>
+          <div class="modal-footer" style="padding:0">
+            <button type="button" class="btn btn-secondary" id="sprint-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Create Sprint</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+`);
 
-    requireAuth();
-    renderNavbar();
+async function init() {
+  const projData = await api.get(`/projects/${projectId}`);
+  document.getElementById("proj-name").textContent = projData.project?.name || "";
+  await loadSprints();
+}
 
-    const params = new URLSearchParams(location.search);
-    const projectId = params.get("project");
-    if (!projectId) location.href = "dashboard.html";
+async function loadSprints() {
+  const data = await api.get(`/projects/${projectId}/sprints`);
+  const sprints = data.sprints || [];
+  const list = document.getElementById("sprints-list");
 
-    const STATUS_STYLE = {
-      planning: "bg-slate-100 text-slate-600",
-      active: "bg-green-100 text-green-700",
-      completed: "bg-blue-100 text-blue-700",
-    };
+  if (!sprints.length) {
+    list.innerHTML = `<div style="text-align:center;padding:60px 0;color:#94a3b8">
+      <div style="font-size:48px;margin-bottom:12px">🏃</div>
+      <p style="font-weight:600;font-size:15px">No sprints yet</p>
+      <p style="font-size:13px;margin-top:4px">Create your first sprint to start planning</p>
+    </div>`;
+    return;
+  }
 
-    function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  list.innerHTML = "";
+  for (const s of sprints) {
+    const statsData = await api.get(`/sprints/${s.id}/stats`);
+    const stats = statsData.total !== undefined ? statsData : { total: 0, done: 0, remaining: 0 };
+    const pct = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
 
-    async function loadProject() {
-      const data = await api.get(`/projects/${projectId}`);
-      if (data.project) document.getElementById("project-name").textContent = data.project.name;
-    }
+    const daysLeft = s.end_date ? Math.ceil((new Date(s.end_date) - new Date()) / 86400000) : null;
+    const isOverdue = daysLeft !== null && daysLeft < 0 && s.status === "active";
 
-    async function loadSprints() {
-      const data = await api.get(`/projects/${projectId}/sprints`);
-      const list = document.getElementById("sprints-list");
-      list.innerHTML = "";
-      const sprints = data.sprints || [];
-
-      if (sprints.length === 0) {
-        list.innerHTML = `<div class="text-center text-slate-400 py-10">
-          <p class="text-3xl mb-2">🏃</p><p>No sprints yet. Create your first sprint!</p>
-        </div>`;
-        return;
-      }
-
-      for (const s of sprints) {
-        const statsData = await api.get(`/sprints/${s.id}/stats`);
-        const stats = statsData.total !== undefined ? statsData : { total: 0, done: 0 };
-        const pct = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
-
-        const card = document.createElement("div");
-        card.className = "bg-white border border-slate-200 rounded-xl p-5";
-        card.innerHTML = `
-          <div class="flex items-start justify-between mb-3">
-            <div>
-              <h3 class="font-semibold text-slate-800">${esc(s.name)}</h3>
-              ${s.goal ? `<p class="text-sm text-slate-500 mt-0.5">${esc(s.goal)}</p>` : ""}
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <div style="padding:20px;border-bottom:1px solid #f1f5f9">
+        <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-bottom:12px">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <span class="badge badge-${s.status}">${s.status}</span>
+              ${isOverdue ? `<span class="badge badge-critical">⚠️ Overdue</span>` : ""}
+              ${daysLeft !== null && daysLeft >= 0 && s.status === "active" ? `<span class="badge badge-medium">${daysLeft}d left</span>` : ""}
             </div>
-            <span class="text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_STYLE[s.status] || "bg-slate-100 text-slate-600"}">${s.status}</span>
+            <h3 style="font-size:16px;font-weight:700;color:#0f172a">${esc(s.name)}</h3>
+            ${s.goal ? `<p style="font-size:13px;color:#64748b;margin-top:4px">${esc(s.goal)}</p>` : ""}
+            <div style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:#94a3b8">
+              ${s.start_date ? `<span>📅 ${s.start_date}</span>` : ""}
+              ${s.end_date ? `<span>🏁 ${s.end_date}</span>` : ""}
+            </div>
           </div>
-          <div class="flex gap-4 text-xs text-slate-500 mb-4">
-            ${s.start_date ? `<span>Start: ${s.start_date}</span>` : ""}
-            ${s.end_date ? `<span>End: ${s.end_date}</span>` : ""}
-            <span>${stats.done}/${stats.total} tasks done</span>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <a href="board.html?project=${projectId}&sprint_filter=${s.id}" class="btn btn-sm btn-secondary">Board</a>
+            ${s.status === "planning" ? `<button class="btn btn-sm btn-primary action-btn" data-id="${s.id}" data-action="start">▶ Start</button>` : ""}
+            ${s.status === "active" ? `<button class="btn btn-sm btn-ghost action-btn" data-id="${s.id}" data-action="complete">✓ Complete</button>` : ""}
+            <button class="btn btn-sm btn-danger action-btn" data-id="${s.id}" data-action="delete">Del</button>
           </div>
-          <div class="w-full bg-slate-100 rounded-full h-2 mb-4">
-            <div class="bg-indigo-500 h-2 rounded-full transition-all" style="width:${pct}%"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px">
+          <div style="text-align:center;background:#f8fafc;border-radius:8px;padding:10px">
+            <div style="font-size:22px;font-weight:800;color:#0f172a">${stats.total}</div>
+            <div style="font-size:11px;color:#64748b">Total Tasks</div>
           </div>
-          <div class="flex gap-2">
-            <a href="board.html?project=${projectId}&sprint=${s.id}" class="text-xs px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 font-medium">View Board</a>
-            ${s.status === "planning" ? `<button class="action-btn text-xs px-3 py-1.5 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 font-medium" data-id="${s.id}" data-action="start">Start Sprint</button>` : ""}
-            ${s.status === "active" ? `<button class="action-btn text-xs px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 font-medium" data-id="${s.id}" data-action="complete">Complete Sprint</button>` : ""}
-            <button class="action-btn text-xs px-3 py-1.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 font-medium ml-auto" data-id="${s.id}" data-action="delete">Delete</button>
-          </div>`;
-        list.appendChild(card);
-      }
+          <div style="text-align:center;background:#f0fdf4;border-radius:8px;padding:10px">
+            <div style="font-size:22px;font-weight:800;color:#16a34a">${stats.done}</div>
+            <div style="font-size:11px;color:#64748b">Done</div>
+          </div>
+          <div style="text-align:center;background:#fefce8;border-radius:8px;padding:10px">
+            <div style="font-size:22px;font-weight:800;color:#ca8a04">${stats.remaining}</div>
+            <div style="font-size:11px;color:#64748b">Remaining</div>
+          </div>
+          <div style="text-align:center;background:#eff6ff;border-radius:8px;padding:10px">
+            <div style="font-size:22px;font-weight:800;color:#2563eb">${pct}%</div>
+            <div style="font-size:11px;color:#64748b">Complete</div>
+          </div>
+        </div>
+        <div style="background:#f1f5f9;border-radius:8px;overflow:hidden">
+          <div style="height:10px;background:${pct>=100?"#22c55e":"#6366f1"};width:${pct}%;transition:width .4s;min-width:${pct>0?"4px":"0"}"></div>
+        </div>
+      </div>`;
+    list.appendChild(card);
+  }
 
-      document.querySelectorAll(".action-btn").forEach(btn => {
-        btn.addEventListener("click", async () => {
-          const { id, action } = btn.dataset;
-          if (action === "start") await api.post(`/sprints/${id}/start`);
-          else if (action === "complete") await api.post(`/sprints/${id}/complete`);
-          else if (action === "delete" && confirm("Delete this sprint? Tasks will stay in the project.")) await api.delete(`/sprints/${id}`);
-          loadSprints();
-        });
-      });
-    }
-
-    document.getElementById("new-sprint-btn").onclick = () => document.getElementById("sprint-modal").classList.remove("hidden");
-    document.getElementById("sprint-cancel").onclick = () => document.getElementById("sprint-modal").classList.add("hidden");
-
-    document.getElementById("sprint-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const errEl = document.getElementById("sprint-error");
-      errEl.classList.add("hidden");
-      const data = await api.post(`/projects/${projectId}/sprints`, {
-        name: document.getElementById("sprint-name").value.trim(),
-        goal: document.getElementById("sprint-goal").value.trim(),
-        start_date: document.getElementById("sprint-start").value || null,
-        end_date: document.getElementById("sprint-end").value || null,
-      });
-      if (data.error) { errEl.textContent = data.error; errEl.classList.remove("hidden"); return; }
-      document.getElementById("sprint-modal").classList.add("hidden");
-      document.getElementById("sprint-form").reset();
+  document.querySelectorAll(".action-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const { id, action } = btn.dataset;
+      if (action === "start") await api.post(`/sprints/${id}/start`);
+      else if (action === "complete") await api.post(`/sprints/${id}/complete`);
+      else if (action === "delete" && confirm("Delete this sprint? Tasks will stay in the project.")) await api.delete(`/sprints/${id}`);
       loadSprints();
     });
+  });
+}
 
-    await loadProject();
-    await loadSprints();
-  </script>
+document.getElementById("new-sprint-btn").onclick = () => document.getElementById("sprint-modal").classList.add("open");
+document.getElementById("sprint-modal-close").onclick = () => document.getElementById("sprint-modal").classList.remove("open");
+document.getElementById("sprint-cancel").onclick = () => document.getElementById("sprint-modal").classList.remove("open");
+
+document.getElementById("sprint-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const errEl = document.getElementById("sprint-error");
+  errEl.style.display = "none";
+  const data = await api.post(`/projects/${projectId}/sprints`, {
+    name: document.getElementById("sprint-name").value.trim(),
+    goal: document.getElementById("sprint-goal").value.trim(),
+    start_date: document.getElementById("sprint-start").value || null,
+    end_date: document.getElementById("sprint-end").value || null,
+  });
+  if (data.error) { errEl.textContent = data.error; errEl.style.display = "block"; return; }
+  document.getElementById("sprint-modal").classList.remove("open");
+  document.getElementById("sprint-form").reset();
+  loadSprints();
+});
+
+init();
+</script>
 </body>
 </html>

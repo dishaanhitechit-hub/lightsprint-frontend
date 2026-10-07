@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Members — LightSprint</title>
+  <link rel="stylesheet" href="../assets/css/main.css" />
+</head>
+<body>
+<script type="module">
+import { requireAuth, getCurrentUser } from "../assets/js/auth.js";
+import { renderLayout, setContent } from "../assets/js/layout.js";
+import { api } from "../assets/js/api.js";
+
+requireAuth();
+renderLayout("members");
+
+const params = new URLSearchParams(location.search);
+const projectId = params.get("project");
+if (!projectId) location.href = "dashboard.html";
+const currentUser = getCurrentUser();
+
+function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+setContent(`
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb"><a href="dashboard.html">Projects</a> › <span id="proj-name">…</span></div>
+      <div class="page-title">👥 Team Members</div>
+      <div class="page-subtitle">Manage who has access to this project</div>
+    </div>
+    <button class="btn btn-primary" id="invite-btn">+ Invite Member</button>
+  </div>
+  <div class="page-body">
+    <div class="card" style="overflow:hidden">
+      <table class="ls-table" id="members-table">
+        <thead><tr><th>Member</th><th>Email</th><th>Role</th><th>Joined</th><th>Actions</th></tr></thead>
+        <tbody id="members-body"><tr><td colspan="5" style="text-align:center;padding:40px;color:#94a3b8">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="invite-modal">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-header">
+        <span class="modal-title">Invite Member</span>
+        <button class="modal-close" id="invite-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="error-box" id="invite-error" style="display:none"></div>
+        <form id="invite-form">
+          <div class="form-group"><label class="form-label">Email Address *</label>
+            <input class="form-input" id="invite-email" type="email" required placeholder="colleague@example.com" /></div>
+          <div class="form-group"><label class="form-label">Role</label>
+            <select class="form-select" id="invite-role">
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select></div>
+          <div class="modal-footer" style="padding:0">
+            <button type="button" class="btn btn-secondary" id="invite-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Send Invite</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+`);
+
+async function init() {
+  const projData = await api.get(`/projects/${projectId}`);
+  document.getElementById("proj-name").textContent = projData.project?.name || "";
+  await loadMembers();
+}
+
+async function loadMembers() {
+  const data = await api.get(`/projects/${projectId}/members`);
+  const members = data.members || [];
+  const tbody = document.getElementById("members-body");
+  tbody.innerHTML = members.map(m => `
+    <tr>
+      <td>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="user-avatar" style="width:36px;height:36px;font-size:14px">${(m.user.name||"U")[0].toUpperCase()}</div>
+          <span style="font-weight:600;color:#0f172a">${esc(m.user.name)}</span>
+          ${m.user_id === currentUser?.id ? `<span class="badge" style="background:#ede9fe;color:#5b21b6">You</span>` : ""}
+        </div>
+      </td>
+      <td style="color:#64748b">${esc(m.user.email)}</td>
+      <td><span class="badge ${m.role==="admin"?"badge-critical":"badge-medium"}">${m.role}</span></td>
+      <td style="color:#94a3b8;font-size:12px">${new Date(m.joined_at).toLocaleDateString()}</td>
+      <td>
+        ${m.user_id !== currentUser?.id
+          ? `<button class="btn btn-sm btn-danger" onclick="removeMember('${m.user_id}','${esc(m.user.name)}')">Remove</button>`
+          : "—"}
+      </td>
+    </tr>`).join("");
+}
+
+window.removeMember = async (userId, name) => {
+  if (!confirm(`Remove ${name} from this project?`)) return;
+  const data = await api.delete(`/projects/${projectId}/members/${userId}`);
+  if (data.error) return alert(data.error);
+  loadMembers();
+};
+
+document.getElementById("invite-btn").onclick = () => document.getElementById("invite-modal").classList.add("open");
+document.getElementById("invite-close").onclick = () => document.getElementById("invite-modal").classList.remove("open");
+document.getElementById("invite-cancel").onclick = () => document.getElementById("invite-modal").classList.remove("open");
+
+document.getElementById("invite-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const errEl = document.getElementById("invite-error");
+  errEl.style.display = "none";
+  const data = await api.post(`/projects/${projectId}/members`, {
+    email: document.getElementById("invite-email").value.trim().toLowerCase(),
+    role: document.getElementById("invite-role").value,
+  });
+  if (data.error) { errEl.textContent = data.error; errEl.style.display = "block"; return; }
+  document.getElementById("invite-modal").classList.remove("open");
+  document.getElementById("invite-form").reset();
+  loadMembers();
+});
+
+init();
+</script>
+</body>
+</html>

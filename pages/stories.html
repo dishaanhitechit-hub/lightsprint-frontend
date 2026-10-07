@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>User Stories — LightSprint</title>
+  <link rel="stylesheet" href="../assets/css/main.css" />
+</head>
+<body>
+<script type="module">
+import { requireAuth } from "../assets/js/auth.js";
+import { renderLayout, setContent } from "../assets/js/layout.js";
+import { api } from "../assets/js/api.js";
+
+requireAuth();
+renderLayout("stories");
+
+const params = new URLSearchParams(location.search);
+const projectId = params.get("project");
+if (!projectId) location.href = "dashboard.html";
+
+function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+setContent(`
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb"><a href="dashboard.html">Projects</a> › <span id="proj-name">…</span></div>
+      <div class="page-title">📖 User Stories</div>
+      <div class="page-subtitle">Break work into stories. Each story has tasks with time estimates.</div>
+    </div>
+    <button class="btn btn-primary" id="add-story-btn">+ New Story</button>
+  </div>
+  <div class="page-body">
+    <div id="stories-list" style="display:flex;flex-direction:column;gap:16px">
+      <p style="color:#94a3b8;text-align:center;padding:40px 0">Loading...</p>
+    </div>
+  </div>
+
+  <!-- Story Modal -->
+  <div class="modal-overlay" id="story-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="story-modal-title">New User Story</span>
+        <button class="modal-close" id="story-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="error-box" id="story-error" style="display:none"></div>
+        <form id="story-form">
+          <input type="hidden" id="story-edit-id" />
+          <div class="form-group"><label class="form-label">Story Title *</label>
+            <input class="form-input" id="story-title" required placeholder="As a user, I want to..." /></div>
+          <div class="form-group"><label class="form-label">Description</label>
+            <textarea class="form-textarea" id="story-desc" placeholder="Acceptance criteria, context..."></textarea></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Priority</label>
+              <select class="form-select" id="story-priority">
+                <option value="medium">Medium</option><option value="low">Low</option>
+                <option value="high">High</option><option value="critical">Critical</option>
+              </select></div>
+            <div class="form-group"><label class="form-label">Est. Hours</label>
+              <input class="form-input" type="number" id="story-hours" min="1" step="0.5" placeholder="e.g. 16" /></div>
+          </div>
+          <div class="form-group"><label class="form-label">Sprint (optional)</label>
+            <select class="form-select" id="story-sprint"><option value="">No sprint</option></select></div>
+          <div class="modal-footer" style="padding:0">
+            <button type="button" class="btn btn-secondary" id="story-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save Story</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Task in Story Modal -->
+  <div class="modal-overlay" id="task-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Add Task to Story</span>
+        <button class="modal-close" id="task-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="task-form">
+          <input type="hidden" id="story-id-for-task" />
+          <div class="form-group"><label class="form-label">Task Title *</label>
+            <input class="form-input" id="task-title" required placeholder="Implement..." /></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Priority</label>
+              <select class="form-select" id="task-priority">
+                <option value="medium">Medium</option><option value="low">Low</option>
+                <option value="high">High</option><option value="critical">Critical</option>
+              </select></div>
+            <div class="form-group"><label class="form-label">Assign To</label>
+              <select class="form-select" id="task-assignee"><option value="">Unassigned</option></select></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Est. Hours</label>
+              <input class="form-input" type="number" id="task-hours" min="0.5" step="0.5" placeholder="e.g. 4" /></div>
+            <div class="form-group"><label class="form-label">Due Date</label>
+              <input class="form-input" type="date" id="task-due" /></div>
+          </div>
+          <div class="modal-footer" style="padding:0">
+            <button type="button" class="btn btn-secondary" id="task-cancel">Cancel</button>
+            <button type="submit" class="btn btn-primary">Add Task</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+`);
+
+let members = [], sprints = [];
+
+async function init() {
+  const [projData, membersData, sprintsData] = await Promise.all([
+    api.get(`/projects/${projectId}`),
+    api.get(`/projects/${projectId}/members`),
+    api.get(`/projects/${projectId}/sprints`),
+  ]);
+  document.getElementById("proj-name").textContent = projData.project?.name || "";
+  members = membersData.members || [];
+  sprints = sprintsData.sprints || [];
+
+  const asSel = document.getElementById("task-assignee");
+  members.forEach(m => { const o = document.createElement("option"); o.value = m.user_id; o.textContent = m.user.name; asSel.appendChild(o); });
+
+  const sprintSel = document.getElementById("story-sprint");
+  sprints.filter(s => s.status !== "completed").forEach(s => {
+    const o = document.createElement("option"); o.value = s.id; o.textContent = `${s.name} (${s.status})`; sprintSel.appendChild(o);
+  });
+
+  await loadStories();
+}
+
+async function loadStories() {
+  const data = await api.get(`/projects/${projectId}/stories`);
+  const list = document.getElementById("stories-list");
+  const stories = data.stories || [];
+
+  if (!stories.length) {
+    list.innerHTML = `<div style="text-align:center;padding:60px 0;color:#94a3b8">
+      <div style="font-size:48px;margin-bottom:12px">📖</div>
+      <p style="font-weight:600;font-size:15px">No user stories yet</p>
+      <p style="font-size:13px;margin-top:4px">Create stories to break down your project work</p>
+    </div>`;
+    return;
+  }
+
+  list.innerHTML = "";
+  for (const s of stories) {
+    const pct = s.estimated_hours ? Math.min(100, Math.round((s.logged_hours / s.estimated_hours) * 100)) : 0;
+    const taskPct = s.task_count ? Math.round((s.done_count / s.task_count) * 100) : 0;
+    const storyEl = document.createElement("div");
+    storyEl.className = "card";
+    storyEl.innerHTML = `
+      <div style="padding:16px 20px;border-bottom:1px solid #f1f5f9">
+        <div style="display:flex;align-items:start;justify-content:space-between;gap:12px">
+          <div style="flex:1">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <span class="badge badge-${s.priority}">${s.priority}</span>
+              <span class="badge badge-${s.status}">${s.status.replace("_"," ")}</span>
+            </div>
+            <h3 style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:4px">${esc(s.title)}</h3>
+            ${s.description ? `<p style="font-size:13px;color:#64748b">${esc(s.description.slice(0,120))}${s.description.length>120?"…":""}</p>` : ""}
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn btn-sm btn-secondary" onclick="editStory('${s.id}','${esc(s.title)}','${esc(s.description||"")}','${s.priority}','${s.estimated_hours||""}','${s.sprint_id||""}')">Edit</button>
+            <button class="btn btn-sm btn-primary" onclick="addTaskToStory('${s.id}')">+ Task</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteStory('${s.id}')">Del</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:14px">
+          <div style="text-align:center">
+            <div style="font-size:20px;font-weight:800;color:#0f172a">${s.task_count}</div>
+            <div style="font-size:11px;color:#64748b">Tasks</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:20px;font-weight:800;color:#16a34a">${s.done_count}</div>
+            <div style="font-size:11px;color:#64748b">Done</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:20px;font-weight:800;color:#4f46e5">${s.logged_hours||0}h</div>
+            <div style="font-size:11px;color:#64748b">Logged</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:20px;font-weight:800;color:${(s.remaining_hours||0)<=0?"#dc2626":"#0f172a"}">${s.estimated_hours ? `${s.remaining_hours||0}h` : "—"}</div>
+            <div style="font-size:11px;color:#64748b">Remaining</div>
+          </div>
+        </div>
+        ${s.estimated_hours ? `<div style="margin-top:12px">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:4px">
+            <span>Time: ${pct}%</span><span>Tasks: ${taskPct}%</span>
+          </div>
+          <div class="time-bar"><div class="time-bar-fill ${pct>=100?"overdue":""}" style="width:${pct}%"></div></div>
+        </div>` : ""}
+      </div>
+      <div id="tasks-${s.id}" style="padding:12px 20px">
+        <p style="font-size:12px;color:#94a3b8;text-align:center">Loading tasks...</p>
+      </div>`;
+    list.appendChild(storyEl);
+    loadStoryTasks(s.id);
+  }
+}
+
+async function loadStoryTasks(storyId) {
+  const data = await api.get(`/stories/${storyId}`);
+  const tasks = data.tasks || [];
+  const el = document.getElementById(`tasks-${storyId}`);
+  if (!tasks.length) { el.innerHTML = `<p style="font-size:12px;color:#94a3b8;text-align:center">No tasks yet. Click "+ Task" to add one.</p>`; return; }
+  el.innerHTML = tasks.map(t => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f8fafc">
+      <span class="badge badge-${t.status}" style="min-width:80px;text-align:center">${t.status.replace("_"," ")}</span>
+      <span style="flex:1;font-size:13px;font-weight:500;color:#0f172a">${esc(t.title)}</span>
+      ${t.assignee_name ? `<div style="display:flex;align-items:center;gap:4px;font-size:11px;color:#64748b"><div class="task-card-avatar">${t.assignee_name[0]}</div>${esc(t.assignee_name)}</div>` : ""}
+      ${t.estimated_hours ? `<span style="font-size:12px;color:#4f46e5;white-space:nowrap">${t.logged_hours||0}/${t.estimated_hours}h</span>` : ""}
+      ${t.due_date ? `<span style="font-size:11px;color:#94a3b8">${t.due_date}</span>` : ""}
+    </div>`).join("");
+}
+
+window.editStory = (id, title, desc, priority, hours, sprintId) => {
+  document.getElementById("story-modal-title").textContent = "Edit Story";
+  document.getElementById("story-edit-id").value = id;
+  document.getElementById("story-title").value = title;
+  document.getElementById("story-desc").value = desc;
+  document.getElementById("story-priority").value = priority;
+  document.getElementById("story-hours").value = hours;
+  document.getElementById("story-sprint").value = sprintId;
+  document.getElementById("story-modal").classList.add("open");
+};
+
+window.addTaskToStory = (storyId) => {
+  document.getElementById("story-id-for-task").value = storyId;
+  document.getElementById("task-form").reset();
+  document.getElementById("task-modal").classList.add("open");
+};
+
+window.deleteStory = async (id) => {
+  if (!confirm("Delete this story? Tasks will remain in the project.")) return;
+  await api.delete(`/stories/${id}`);
+  loadStories();
+};
+
+document.getElementById("add-story-btn").onclick = () => {
+  document.getElementById("story-modal-title").textContent = "New User Story";
+  document.getElementById("story-edit-id").value = "";
+  document.getElementById("story-form").reset();
+  document.getElementById("story-modal").classList.add("open");
+};
+["story-modal-close","story-cancel"].forEach(id => document.getElementById(id).onclick = () => document.getElementById("story-modal").classList.remove("open"));
+["task-modal-close","task-cancel"].forEach(id => document.getElementById(id).onclick = () => document.getElementById("task-modal").classList.remove("open"));
+
+document.getElementById("story-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const editId = document.getElementById("story-edit-id").value;
+  const payload = {
+    title: document.getElementById("story-title").value.trim(),
+    description: document.getElementById("story-desc").value.trim(),
+    priority: document.getElementById("story-priority").value,
+    estimated_hours: document.getElementById("story-hours").value ? +document.getElementById("story-hours").value : null,
+    sprint_id: document.getElementById("story-sprint").value || null,
+  };
+  const data = editId ? await api.put(`/stories/${editId}`, payload) : await api.post(`/projects/${projectId}/stories`, payload);
+  if (data.error) { document.getElementById("story-error").textContent = data.error; document.getElementById("story-error").style.display = "block"; return; }
+  document.getElementById("story-modal").classList.remove("open");
+  loadStories();
+});
+
+document.getElementById("task-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const storyId = document.getElementById("story-id-for-task").value;
+  const payload = {
+    title: document.getElementById("task-title").value.trim(),
+    priority: document.getElementById("task-priority").value,
+    assignee_id: document.getElementById("task-assignee").value || null,
+    estimated_hours: document.getElementById("task-hours").value ? +document.getElementById("task-hours").value : null,
+    due_date: document.getElementById("task-due").value || null,
+    user_story_id: storyId,
+    status: "pool",
+  };
+  const data = await api.post(`/projects/${projectId}/tasks`, payload);
+  if (data.error) return alert(data.error);
+  document.getElementById("task-modal").classList.remove("open");
+  loadStories();
+});
+
+init();
+</script>
+</body>
+</html>

@@ -1,183 +1,180 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Backlog — LightSprint</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="../assets/css/main.css" />
 </head>
-<body class="bg-slate-50 min-h-screen">
-  <div id="navbar"></div>
+<body>
+<script type="module">
+import { requireAuth } from "../assets/js/auth.js";
+import { renderLayout, setContent } from "../assets/js/layout.js";
+import { api } from "../assets/js/api.js";
 
-  <main class="max-w-4xl mx-auto px-6 py-8">
-    <div class="flex items-center justify-between mb-6">
-      <div>
-        <div class="text-sm text-slate-500 mb-1">
-          <a href="dashboard.html" class="hover:text-indigo-600">Projects</a>
-          <span class="mx-1">›</span>
-          <span id="project-name" class="text-slate-700 font-medium">Loading...</span>
-        </div>
-        <h1 class="text-xl font-bold text-slate-800">Backlog</h1>
-        <p class="text-sm text-slate-500 mt-0.5">Tasks not yet assigned to a sprint</p>
+requireAuth();
+renderLayout("backlog");
+
+const params = new URLSearchParams(location.search);
+const projectId = params.get("project");
+if (!projectId) location.href = "dashboard.html";
+
+function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+setContent(`
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb"><a href="dashboard.html">Projects</a> › <span id="proj-name">…</span></div>
+      <div class="page-title">📋 Backlog</div>
+      <div class="page-subtitle">Overdue tasks and tasks moved from pool. Admin assigns to sprints.</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select class="form-select" id="sprint-sel" style="width:200px"><option value="">Select sprint to assign...</option></select>
+      <button class="btn btn-primary" id="assign-btn">Assign Selected →</button>
+    </div>
+  </div>
+  <div class="page-body">
+    <div class="stats-row" id="stats-row"></div>
+    <div class="card" style="overflow:hidden">
+      <div style="padding:12px 16px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="select-all" style="width:16px;height:16px;accent-color:#6366f1" />
+        <label for="select-all" style="font-size:13px;font-weight:600;color:#475569;cursor:pointer">Select All</label>
       </div>
-      <div class="flex gap-2">
-        <a id="board-link" href="#" class="text-sm px-3 py-2 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-100">Board</a>
-        <button id="add-task-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">+ Add Task</button>
-      </div>
-    </div>
-
-    <!-- Sprint assignment bar -->
-    <div class="bg-white border border-slate-200 rounded-xl p-4 mb-5 flex items-center gap-3">
-      <span class="text-sm text-slate-600 font-medium">Move selected to:</span>
-      <select id="sprint-select" class="text-sm border border-slate-300 rounded-lg px-3 py-1.5 outline-none flex-1 max-w-xs">
-        <option value="">Choose a sprint...</option>
-      </select>
-      <button id="assign-btn" class="text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">Assign to Sprint</button>
-    </div>
-
-    <div id="backlog-list" class="space-y-2">
-      <div class="text-center text-slate-400 py-10">Loading backlog...</div>
-    </div>
-  </main>
-
-  <!-- Add Task Modal -->
-  <div id="task-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4">
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-      <h2 class="text-lg font-semibold text-slate-800 mb-4">Add to Backlog</h2>
-      <div id="task-error" class="hidden mb-3 px-3 py-2 bg-red-50 text-red-600 text-sm rounded-lg border border-red-200"></div>
-      <form id="task-form" class="space-y-3">
-        <input type="text" id="task-title" required placeholder="Task title *"
-          class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm" />
-        <textarea id="task-desc" rows="2" placeholder="Description (optional)"
-          class="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm resize-none"></textarea>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-medium text-slate-500 mb-1">Priority</label>
-            <select id="task-priority" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none">
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-slate-500 mb-1">Story Points</label>
-            <input type="number" id="task-points" min="1" max="100"
-              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none" />
-          </div>
-        </div>
-        <div class="flex gap-3 justify-end pt-2">
-          <button type="button" id="task-cancel" class="px-4 py-2 text-sm text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">Cancel</button>
-          <button type="submit" class="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold">Add</button>
-        </div>
-      </form>
+      <table class="ls-table" id="backlog-table">
+        <thead>
+          <tr>
+            <th style="width:32px"></th>
+            <th>Task</th><th>Priority</th><th>Assignee</th>
+            <th>Est. Hours</th><th>Due Date</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="backlog-body"><tr><td colspan="7" style="text-align:center;padding:40px;color:#94a3b8">Loading...</td></tr></tbody>
+      </table>
     </div>
   </div>
 
-  <script type="module">
-    import { requireAuth } from "../assets/js/auth.js";
-    import { renderNavbar } from "../components/navbar.js";
-    import { api } from "../assets/js/api.js";
+  <!-- Assign Member Modal -->
+  <div class="modal-overlay" id="assign-modal">
+    <div class="modal" style="max-width:380px">
+      <div class="modal-header">
+        <span class="modal-title">Assign Task</span>
+        <button class="modal-close" id="assign-modal-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group"><label class="form-label">Assign to Member</label>
+          <select class="form-select" id="member-sel"><option value="">Unassigned</option></select></div>
+        <input type="hidden" id="assign-task-id" />
+        <div class="modal-footer" style="padding:0">
+          <button type="button" class="btn btn-secondary" id="assign-cancel">Cancel</button>
+          <button class="btn btn-primary" id="assign-confirm">Assign</button>
+        </div>
+      </div>
+    </div>
+  </div>
+`);
 
-    requireAuth();
-    renderNavbar();
+let members = [], selectedTasks = new Set();
 
-    const params = new URLSearchParams(location.search);
-    const projectId = params.get("project");
-    if (!projectId) location.href = "dashboard.html";
+async function init() {
+  const [projData, membersData, sprintsData] = await Promise.all([
+    api.get(`/projects/${projectId}`),
+    api.get(`/projects/${projectId}/members`),
+    api.get(`/projects/${projectId}/sprints`),
+  ]);
+  document.getElementById("proj-name").textContent = projData.project?.name || "";
+  members = membersData.members || [];
 
-    document.getElementById("board-link").href = `board.html?project=${projectId}`;
+  const memberSel = document.getElementById("member-sel");
+  members.forEach(m => { const o = document.createElement("option"); o.value = m.user_id; o.textContent = m.user.name; memberSel.appendChild(o); });
 
-    const PRIORITY_COLORS = { critical: "text-red-600 bg-red-50", high: "text-orange-600 bg-orange-50", medium: "text-indigo-600 bg-indigo-50", low: "text-green-600 bg-green-50" };
-    let selectedTasks = new Set();
+  const sprintSel = document.getElementById("sprint-sel");
+  (sprintsData.sprints || []).filter(s => s.status !== "completed").forEach(s => {
+    const o = document.createElement("option"); o.value = s.id; o.textContent = `${s.name} (${s.status})`; sprintSel.appendChild(o);
+  });
 
-    function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  await loadBacklog();
+}
 
-    async function loadProject() {
-      const data = await api.get(`/projects/${projectId}`);
-      if (data.project) document.getElementById("project-name").textContent = data.project.name;
-    }
+async function loadBacklog() {
+  await api.post(`/projects/${projectId}/tasks/sync-overdue`);
+  const data = await api.get(`/projects/${projectId}/tasks?sprint_id=backlog`);
+  const tasks = data.tasks || [];
 
-    async function loadSprints() {
-      const data = await api.get(`/projects/${projectId}/sprints`);
-      const sel = document.getElementById("sprint-select");
-      (data.sprints || []).filter(s => s.status !== "completed").forEach(s => {
-        const opt = document.createElement("option");
-        opt.value = s.id;
-        opt.textContent = `${s.name} (${s.status})`;
-        sel.appendChild(opt);
-      });
-    }
+  document.getElementById("stats-row").innerHTML = `
+    <div class="stat-card accent-orange"><div class="stat-value">${tasks.length}</div><div class="stat-label">In Backlog</div></div>
+    <div class="stat-card accent-red"><div class="stat-value">${tasks.filter(t=>t.due_date && new Date(t.due_date)<new Date()).length}</div><div class="stat-label">Overdue</div></div>
+    <div class="stat-card accent-indigo"><div class="stat-value">${tasks.filter(t=>!t.assignee_id).length}</div><div class="stat-label">Unassigned</div></div>
+    <div class="stat-card accent-green"><div class="stat-value">${tasks.reduce((s,t)=>s+(t.story_points||0),0)}</div><div class="stat-label">Total Story Points</div></div>`;
 
-    async function loadBacklog() {
-      const data = await api.get(`/projects/${projectId}/tasks?sprint_id=backlog`);
-      const list = document.getElementById("backlog-list");
-      list.innerHTML = "";
-      const tasks = data.tasks || [];
+  const tbody = document.getElementById("backlog-body");
+  if (!tasks.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:#94a3b8">✅ Backlog is empty</td></tr>`;
+    return;
+  }
 
-      if (tasks.length === 0) {
-        list.innerHTML = `<div class="text-center text-slate-400 py-10">
-          <p class="text-3xl mb-2">✅</p><p>Backlog is empty</p>
-        </div>`;
-        return;
-      }
+  selectedTasks.clear();
+  tbody.innerHTML = tasks.map(t => {
+    const overdue = t.due_date && new Date(t.due_date) < new Date();
+    return `<tr>
+      <td><input type="checkbox" class="task-cb" data-id="${t.id}" style="width:16px;height:16px;accent-color:#6366f1" /></td>
+      <td>
+        <div style="font-weight:600;color:#0f172a">${esc(t.title)}</div>
+        ${t.user_story_id ? `<div style="font-size:11px;color:#6366f1;margin-top:2px">📖 Story linked</div>` : ""}
+      </td>
+      <td><span class="badge badge-${t.priority}">${t.priority}</span></td>
+      <td>${t.assignee_name
+        ? `<div style="display:flex;align-items:center;gap:6px"><div class="task-card-avatar">${t.assignee_name[0]}</div>${esc(t.assignee_name)}</div>`
+        : `<span style="color:#94a3b8;font-size:12px">—</span>`}</td>
+      <td>${t.estimated_hours ? `<span style="color:#4f46e5;font-weight:600">${t.estimated_hours}h</span>` : "—"}</td>
+      <td><span style="color:${overdue?"#dc2626":"#334155"};font-weight:${overdue?"700":"400"}">${t.due_date||"—"}${overdue?" ⚠️":""}</span></td>
+      <td><div style="display:flex;gap:6px">
+        <button class="btn btn-sm btn-secondary" onclick="openAssign('${t.id}')">Assign</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteTask('${t.id}')">Del</button>
+      </div></td>
+    </tr>`;
+  }).join("");
 
-      tasks.forEach(t => {
-        const row = document.createElement("div");
-        row.className = "bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center gap-3 hover:border-indigo-300 transition-colors";
-        row.innerHTML = `
-          <input type="checkbox" class="task-checkbox w-4 h-4 accent-indigo-600 cursor-pointer" data-id="${t.id}" />
-          <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-slate-800 truncate">${esc(t.title)}</p>
-            ${t.description ? `<p class="text-xs text-slate-400 truncate mt-0.5">${esc(t.description)}</p>` : ""}
-          </div>
-          <span class="text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[t.priority] || ""}">${t.priority}</span>
-          ${t.story_points ? `<span class="text-xs text-slate-400">${t.story_points}pts</span>` : ""}
-          ${t.due_date ? `<span class="text-xs text-slate-400">${t.due_date}</span>` : ""}`;
-        list.appendChild(row);
-      });
-
-      document.querySelectorAll(".task-checkbox").forEach(cb => {
-        cb.addEventListener("change", () => {
-          if (cb.checked) selectedTasks.add(cb.dataset.id);
-          else selectedTasks.delete(cb.dataset.id);
-        });
-      });
-    }
-
-    document.getElementById("assign-btn").onclick = async () => {
-      const sprintId = document.getElementById("sprint-select").value;
-      if (!sprintId) return alert("Please select a sprint first");
-      if (selectedTasks.size === 0) return alert("Select at least one task");
-      for (const taskId of selectedTasks) {
-        await api.patch(`/tasks/${taskId}/sprint`, { sprint_id: sprintId });
-      }
-      selectedTasks.clear();
-      loadBacklog();
-    };
-
-    document.getElementById("add-task-btn").onclick = () => document.getElementById("task-modal").classList.remove("hidden");
-    document.getElementById("task-cancel").onclick = () => document.getElementById("task-modal").classList.add("hidden");
-
-    document.getElementById("task-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const errEl = document.getElementById("task-error");
-      errEl.classList.add("hidden");
-      const data = await api.post(`/projects/${projectId}/tasks`, {
-        title: document.getElementById("task-title").value.trim(),
-        description: document.getElementById("task-desc").value.trim(),
-        priority: document.getElementById("task-priority").value,
-        story_points: document.getElementById("task-points").value ? parseInt(document.getElementById("task-points").value) : null,
-      });
-      if (data.error) { errEl.textContent = data.error; errEl.classList.remove("hidden"); return; }
-      document.getElementById("task-modal").classList.add("hidden");
-      document.getElementById("task-form").reset();
-      loadBacklog();
+  document.querySelectorAll(".task-cb").forEach(cb => {
+    cb.addEventListener("change", () => { cb.checked ? selectedTasks.add(cb.dataset.id) : selectedTasks.delete(cb.dataset.id); });
+  });
+  document.getElementById("select-all").onchange = (e) => {
+    document.querySelectorAll(".task-cb").forEach(cb => {
+      cb.checked = e.target.checked;
+      e.target.checked ? selectedTasks.add(cb.dataset.id) : selectedTasks.delete(cb.dataset.id);
     });
+  };
+}
 
-    await loadProject();
-    await loadSprints();
-    await loadBacklog();
-  </script>
+window.openAssign = (id) => {
+  document.getElementById("assign-task-id").value = id;
+  document.getElementById("assign-modal").classList.add("open");
+};
+window.deleteTask = async (id) => {
+  if (!confirm("Delete this task?")) return;
+  await api.delete(`/tasks/${id}`);
+  loadBacklog();
+};
+
+document.getElementById("assign-modal-close").onclick = () => document.getElementById("assign-modal").classList.remove("open");
+document.getElementById("assign-cancel").onclick = () => document.getElementById("assign-modal").classList.remove("open");
+
+document.getElementById("assign-confirm").onclick = async () => {
+  const taskId = document.getElementById("assign-task-id").value;
+  const userId = document.getElementById("member-sel").value;
+  await api.put(`/tasks/${taskId}`, { assignee_id: userId || null });
+  document.getElementById("assign-modal").classList.remove("open");
+  loadBacklog();
+};
+
+document.getElementById("assign-btn").onclick = async () => {
+  const sprintId = document.getElementById("sprint-sel").value;
+  if (!sprintId) return alert("Select a sprint first");
+  if (!selectedTasks.size) return alert("Select at least one task");
+  for (const id of selectedTasks) await api.patch(`/tasks/${id}/sprint`, { sprint_id: sprintId });
+  selectedTasks.clear();
+  loadBacklog();
+};
+
+init();
+</script>
 </body>
 </html>
